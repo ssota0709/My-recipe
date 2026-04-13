@@ -15,36 +15,41 @@ SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1DWKGtW5dDD1yUXllV7cJP
 
 def get_gspread_client():
     scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-    # Streamlit Secretsから認証情報を取得
-    secret_dict = json.loads(st.secrets["gcp_secret"])
-    credentials = Credentials.from_service_account_info(secret_dict, scopes=scopes)
-    return gspread.authorize(credentials)
+    try:
+        secret_dict = json.loads(st.secrets["gcp_secret"])
+        credentials = Credentials.from_service_account_info(secret_dict, scopes=scopes)
+        return gspread.authorize(credentials)
+    except Exception as e:
+        st.error(f"認証エラー: {e}")
+        return None
 
 def get_sheet():
     client = get_gspread_client()
-    sh = client.open_by_url(SPREADSHEET_URL)
-    return sh.sheet1
+    if client:
+        sh = client.open_by_url(SPREADSHEET_URL)
+        return sh.sheet1
+    return None
 
 def init_db():
-    """スプレッドシートの初期設定"""
     try:
         sheet = get_sheet()
-        header = ["id", "title", "author", "ingredients", "steps", "image_b64", "created_at"]
-        values = sheet.get_all_values()
-        if not values or values[0] != header:
-            sheet.clear()
-            sheet.append_row(header)
+        if sheet:
+            header = ["id", "title", "author", "ingredients", "steps", "image_b64", "created_at"]
+            values = sheet.get_all_values()
+            if not values or values[0] != header:
+                sheet.clear()
+                sheet.append_row(header)
     except:
         pass
 
 def add_recipe(title, author, ingredients, steps, image_b64):
     sheet = get_sheet()
-    now = datetime.now().strftime("%y/%m/%d %H:%M")
-    recipe_id = str(int(datetime.now().timestamp()))
-    sheet.append_row([recipe_id, title, author, ingredients, steps, image_b64, now])
+    if sheet:
+        now = datetime.now().strftime("%y/%m/%d %H:%M")
+        recipe_id = str(int(datetime.now().timestamp()))
+        sheet.append_row([recipe_id, title, author, ingredients, steps, image_b64, now])
 
 def compress_image(uploaded_file):
-    """画像を圧縮してBase64形式に変換"""
     img = Image.open(uploaded_file)
     if img.mode != 'RGB':
         img = img.convert('RGB')
@@ -55,32 +60,33 @@ def compress_image(uploaded_file):
 
 def get_all_recipes():
     sheet = get_sheet()
+    if not sheet:
+        return pd.DataFrame()
     rows = sheet.get_all_values()
     if len(rows) <= 1:
         return pd.DataFrame()
-    
     header = rows[0]
     data = rows[1:]
     df = pd.DataFrame(data, columns=header)
-    # 新しい登録順に並び替え
     df = df.iloc[::-1].reset_index(drop=True)
     return df
 
 def delete_recipe(recipe_id):
     sheet = get_sheet()
-    all_values = sheet.get_all_values()
-    for i, row in enumerate(all_values):
-        if i == 0: continue
-        if row[0] == str(recipe_id):
-            sheet.delete_rows(i + 1)
-            break
+    if sheet:
+        all_values = sheet.get_all_values()
+        for i, row in enumerate(all_values):
+            if i == 0: continue
+            if row[0] == str(recipe_id):
+                sheet.delete_rows(i + 1)
+                break
 
 # ==========================================
 # 2. 画面構築
 # ==========================================
 st.set_page_config(page_title="2人のレシピ", page_icon="🍳")
 
-# 起動時に一度だけDB初期化
+# 起動時の初期化
 if 'db_initialized' not in st.session_state:
     init_db()
     st.session_state['db_initialized'] = True
@@ -90,7 +96,6 @@ st.write("今日も料理してえらいね！")
 
 tab1, tab2 = st.tabs(["📖 レシピを見る", "✍️ 登録する"])
 
-# --- タブ2：登録画面 ---
 with tab2:
     st.subheader("新しいレシピを登録")
     with st.form(key='recipe_form', clear_on_submit=True):
@@ -107,61 +112,45 @@ with tab2:
                 if uploaded_file is not None:
                     try:
                         image_b64 = compress_image(uploaded_file)
-                    except Exception as e:
-                        st.error(f"写真の処理でエラー: {e}")
-                
+                    except:
+                        st.error("写真の処理に失敗しました。")
                 try:
                     add_recipe(title, author, ingredients, steps, image_b64)
                     st.success(f"「{title}」を保存したよ！")
-                except Exception as e:
-                    st.error(f"保存エラー: {e}")
+                except:
+                    st.error("保存に失敗しました。")
             else:
                 st.error("入力を完成させてね！")
 
-# --- タブ1：一覧画面 ---
 with tab1:
     try:
         df = get_all_recipes()
         if df.empty:
-            st.info("まだレシピがないよ。登録してみてね！")
+            st.info("まだレシピがないよ。")
         else:
-            # 検索機能
-            search_query = st.text_input("🔍 検索")
-            if search_query:
-                df = df[df['title'].str.contains(search_query, na=False) | 
-                        df['ingredients'].str.contains(search_query, na=False)]
-
-            st.markdown("---")
-
             for i, row in df.iterrows():
-                # タイトルがない空行はスキップ
                 if not row.get('title'):
                     continue
                 
                 st.markdown(f"### 🍽️ {row['title']}")
                 st.caption(f"👤 {row['author']} | 📅 {row['created_at']}")
                 
-                # ここから下が「詳細」の中身
+                # 詳細の中に写真を閉じ込める
                 with st.expander("詳細を見る"):
-                    # 🌟 写真表示はココ（expanderの中）だけ！
                     if row.get('image_b64') and row['image_b64'] != "":
                         try:
                             img_data = base64.b64decode(row['image_b64'])
                             st.image(img_data, use_container_width=True)
                         except:
-                            st.caption("📷 写真の読み込みに失敗しました")
+                            pass
                     
-                    st.write("**【材料】**")
-                    st.write(row['ingredients'])
-                    st.write("**【作り方】**")
-                    st.write(row['steps'])
+                    st.write("**【材料】**\n", row['ingredients'])
+                    st.write("**【作り方】**\n", row['steps'])
                     
                     st.markdown("---")
-                    # 削除ボタン
                     if st.button("🗑️ 削除", key=f"del_{row['id']}"):
                         delete_recipe(row['id'])
                         st.rerun()
-                
                 st.markdown("---")
-    except Exception as e:
-        st.error(f"表示中にエラーが発生しました。")
+    except:
+        st.error("データの読み込み中にエラーが起きました。")
