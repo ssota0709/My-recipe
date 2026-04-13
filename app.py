@@ -1,60 +1,77 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
 from datetime import datetime
+import gspread
+from google.oauth2.service_account import Credentials
 
 # ==========================================
-# 1. データベース設定
+# 1. スプレッドシート接続設定
 # ==========================================
-DB_NAME = 'our_recipes_v2.db'
+# スプレッドシートのURL（あなたが教えてくれたもの）
+SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1DWKGtW5dDD1yUXllV7cJP-xQJJpHwPGAj66lVOtazqk/edit"
+
+def get_gspread_client():
+    """秘密の金庫(Secrets)から鍵を取り出して接続する"""
+    scopes = [
+        'https://www.googleapis.com/auth/spreadsheets',
+        'https://www.googleapis.com/auth/drive'
+    ]
+    # StreamlitのSecretsからJSONの中身を読み込む
+    credentials = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=scopes
+    )
+    return gspread.authorize(credentials)
+
+def get_sheet():
+    client = get_gspread_client()
+    sh = client.open_by_url(SPREADSHEET_URL)
+    return sh.sheet1
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    # ※後方互換性のため image_b64 の列は残しています
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS recipes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT,
-            author TEXT,
-            ingredients TEXT,
-            steps TEXT,
-            image_b64 TEXT,
-            created_at TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
+    """シートが空ならヘッダー（見出し）を作る"""
+    sheet = get_sheet()
+    if not sheet.get_all_values():
+        header = ["id", "title", "author", "ingredients", "steps", "created_at"]
+        sheet.append_row(header)
 
 def add_recipe(title, author, ingredients, steps):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    sheet = get_sheet()
     now = datetime.now().strftime("%y/%m/%d %H:%M")
-    # 写真データは空文字("")として保存します
-    c.execute('INSERT INTO recipes (title, author, ingredients, steps, image_b64, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-              (title, author, ingredients, steps, "", now))
-    conn.commit()
-    conn.close()
+    # 簡易的なIDとして現在のタイムスタンプ（数値）を使用
+    recipe_id = str(int(datetime.now().timestamp()))
+    sheet.append_row([recipe_id, title, author, ingredients, steps, now])
 
 def get_all_recipes():
-    conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql_query("SELECT * FROM recipes ORDER BY id DESC", conn)
-    conn.close()
+    sheet = get_sheet()
+    data = sheet.get_all_records()
+    df = pd.DataFrame(data)
+    if not df.empty:
+        # IDの新しい順に並べ替え
+        df = df.iloc[::-1].reset_index(drop=True)
     return df
 
 def delete_recipe(recipe_id):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('DELETE FROM recipes WHERE id = ?', (recipe_id,))
-    conn.commit()
-    conn.close()
+    sheet = get_sheet()
+    # IDが一致する行を探して削除（ヘッダーがあるので+1、gspreadは1始まりなのでさらに+1）
+    all_values = sheet.get_all_values()
+    for i, row in enumerate(all_values):
+        if i == 0: continue # ヘッダーはスキップ
+        if row[0] == str(recipe_id):
+            sheet.delete_rows(i + 1)
+            break
 
 # ==========================================
 # 2. 画面構築
 # ==========================================
 st.set_page_config(page_title="2人のレシピ", page_icon="🍳", layout="centered")
 
-init_db()
+# 初期化（見出し作成）
+try:
+    init_db()
+except Exception as e:
+    st.error("スプレッドシートへの接続に失敗しました。Secretsの設定を確認してください。")
+    st.stop()
 
 st.title("2人のレシピ🍳")
 st.write("今日も料理してえらいね！")
@@ -67,10 +84,8 @@ with tab2:
     with st.form(key='recipe_form', clear_on_submit=True):
         title = st.text_input("レシピ名", placeholder="例：絶品カレー")
         author = st.radio("作った人", ["にゃんたろ", "ねこちゃん"], horizontal=True)
-        
-        # 🌟変更点：placeholder（例）を追加
-        ingredients = st.text_area("材料", placeholder="例：\n・鶏もも肉 1枚\n・玉ねぎ 1個", height=100)
-        steps = st.text_area("作り方", placeholder="例：\n1. 切る\n2. 炒める", height=100)
+        ingredients = st.text_area("材料", placeholder="例：\n・鶏肉 200g", height=100)
+        steps = st.text_area("作り方", placeholder="例：\n1. 炒める", height=100)
         
         submit_button = st.form_submit_button(label="保存する")
         
@@ -88,19 +103,17 @@ with tab1:
     if recipes_df.empty:
         st.info("まだレシピがないよ。登録してみてね！")
     else:
-        # 検索・フィルター
-        search_query = st.text_input("🔍 検索（名前や材料）")
+        search_query = st.text_input("🔍 検索")
         author_filter = st.radio("絞り込み", ["すべて", "にゃんたろ", "ねこちゃん"], horizontal=True)
         
         if search_query:
-            recipes_df = recipes_df[recipes_df['title'].str.contains(search_query, na=False) | 
-                                    recipes_df['ingredients'].str.contains(search_query, na=False)]
+            recipes_df = recipes_df[recipes_df['title'].astype(str).str.contains(search_query, na=False) | 
+                                    recipes_df['ingredients'].astype(str).str.contains(search_query, na=False)]
         if author_filter != "すべて":
             recipes_df = recipes_df[recipes_df['author'] == author_filter]
 
         st.markdown("---")
 
-        # レシピ表示ループ（写真なしのシンプルレイアウト）
         for index, row in recipes_df.iterrows():
             st.markdown(f"### 🍽️ {row['title']}")
             st.caption(f"👤 {row['author']} | 📅 {row['created_at']}")
@@ -111,10 +124,8 @@ with tab1:
                 st.markdown("**【作り方】**")
                 st.write(row['steps'])
                 
-                # 削除ボタン
                 st.markdown("---")
                 if st.button("🗑️ 削除する", key=f"del_{row['id']}"):
                     delete_recipe(row['id'])
                     st.rerun()
-            
             st.markdown("---")
