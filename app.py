@@ -6,7 +6,7 @@ from google.oauth2.service_account import Credentials
 import json
 import base64
 from io import BytesIO
-from PIL import Image  # 🌟画像圧縮のために使用
+from PIL import Image
 
 # ==========================================
 # 1. スプレッドシート接続設定
@@ -14,10 +14,7 @@ from PIL import Image  # 🌟画像圧縮のために使用
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1DWKGtW5dDD1yUXllV7cJP-xQJJpHwPGAj66lVOtazqk/edit"
 
 def get_gspread_client():
-    scopes = [
-        'https://www.googleapis.com/auth/spreadsheets',
-        'https://www.googleapis.com/auth/drive'
-    ]
+    scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
     secret_dict = json.loads(st.secrets["gcp_secret"])
     credentials = Credentials.from_service_account_info(secret_dict, scopes=scopes)
     return gspread.authorize(credentials)
@@ -28,11 +25,14 @@ def get_sheet():
     return sh.sheet1
 
 def init_db():
+    """スプレッドシートの1行目を強制的に正しくセットする"""
     sheet = get_sheet()
+    header = ["id", "title", "author", "ingredients", "steps", "image_b64", "created_at"]
+    
+    # 1行目を取得して、正しくなければ上書き
     values = sheet.get_all_values()
-    if not values or len(values[0]) < 7:
+    if not values or values[0] != header:
         sheet.clear()
-        header = ["id", "title", "author", "ingredients", "steps", "image_b64", "created_at"]
         sheet.append_row(header)
 
 def add_recipe(title, author, ingredients, steps, image_b64):
@@ -41,27 +41,28 @@ def add_recipe(title, author, ingredients, steps, image_b64):
     recipe_id = str(int(datetime.now().timestamp()))
     sheet.append_row([recipe_id, title, author, ingredients, steps, image_b64, now])
 
-# 🌟画像を小さく圧縮する関数を追加
 def compress_image(uploaded_file):
     img = Image.open(uploaded_file)
-    # RGB形式に変換（PNGなどの透明度を削除）
     if img.mode != 'RGB':
         img = img.convert('RGB')
-    
-    # サイズを最大横幅500pxにリサイズ
-    img.thumbnail((500, 500))
-    
-    # 圧縮してバイトデータに変換
+    img.thumbnail((400, 400)) # 少し小さめにして安定性を高める
     buffer = BytesIO()
-    img.save(buffer, format="JPEG", quality=60) # 画質を60%に落として軽量化
+    img.save(buffer, format="JPEG", quality=50) # 圧縮率を少し上げる
     return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 def get_all_recipes():
     sheet = get_sheet()
-    data = sheet.get_all_records()
-    df = pd.DataFrame(data)
-    if not df.empty:
-        df = df.iloc[::-1].reset_index(drop=True)
+    # 🌟 get_all_values で取得してから DataFrame にすることで「titleが見つからない」エラーを防ぐ
+    rows = sheet.get_all_values()
+    if len(rows) <= 1:
+        return pd.DataFrame()
+    
+    header = rows[0]
+    data = rows[1:]
+    df = pd.DataFrame(data, columns=header)
+    
+    # 新しい順に並び替え
+    df = df.iloc[::-1].reset_index(drop=True)
     return df
 
 def delete_recipe(recipe_id):
@@ -76,13 +77,9 @@ def delete_recipe(recipe_id):
 # ==========================================
 # 2. 画面構築
 # ==========================================
-st.set_page_config(page_title="2人のレシピ", page_icon="🍳", layout="centered")
+st.set_page_config(page_title="2人のレシピ", page_icon="🍳")
 
-try:
-    init_db()
-except Exception as e:
-    st.error(f"接続エラー: {e}")
-    st.stop()
+init_db()
 
 st.title("2人のレシピ🍳")
 st.write("今日も料理してえらいね！")
@@ -97,7 +94,6 @@ with tab2:
         ingredients = st.text_area("材料")
         steps = st.text_area("作り方")
         uploaded_file = st.file_uploader("写真", type=["jpg", "jpeg", "png"])
-        
         submit_button = st.form_submit_button(label="保存する")
         
         if submit_button:
@@ -105,43 +101,19 @@ with tab2:
                 image_b64 = ""
                 if uploaded_file is not None:
                     try:
-                        # 🌟ここで圧縮を実行
                         image_b64 = compress_image(uploaded_file)
                     except Exception as e:
-                        st.error(f"画像の処理に失敗しました: {e}")
+                        st.error(f"写真の処理でエラー: {e}")
                 
                 try:
                     add_recipe(title, author, ingredients, steps, image_b64)
                     st.success(f"「{title}」を保存したよ！")
                 except Exception as e:
-                    # エラー内容を詳しく表示させる
-                    st.error(f"保存に失敗しました。データが大きすぎる可能性があります: {e}")
+                    st.error(f"保存エラー: {e}")
             else:
-                st.error("入力が足りないよ！")
+                st.error("入力を完成させてね！")
 
 with tab1:
     try:
-        recipes_df = get_all_recipes()
-        if recipes_df.empty:
-            st.info("まだレシピがないよ。")
-        else:
-            for index, row in recipes_df.iterrows():
-                st.markdown(f"### 🍽️ {row['title']}")
-                st.caption(f"👤 {row['author']} | 📅 {row['created_at']}")
-                
-                if "image_b64" in row and row['image_b64']:
-                    try:
-                        img_data = base64.b64decode(row['image_b64'])
-                        st.image(img_data, use_container_width=True)
-                    except:
-                        pass
-                
-                with st.expander("詳細を見る"):
-                    st.write("**【材料】**\n", row['ingredients'])
-                    st.write("**【作り方】**\n", row['steps'])
-                    if st.button("🗑️ 削除", key=f"del_{row['id']}"):
-                        delete_recipe(row['id'])
-                        st.rerun()
-                st.markdown("---")
-    except Exception as e:
-        st.error(f"表示エラー: {e}")
+        df = get_all_recipes()
+        if df.empty:
