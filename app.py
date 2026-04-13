@@ -26,14 +26,15 @@ def get_sheet():
 
 def init_db():
     """スプレッドシートの1行目を強制的に正しくセットする"""
-    sheet = get_sheet()
-    header = ["id", "title", "author", "ingredients", "steps", "image_b64", "created_at"]
-    
-    # 1行目を取得して、正しくなければ上書き
-    values = sheet.get_all_values()
-    if not values or values[0] != header:
-        sheet.clear()
-        sheet.append_row(header)
+    try:
+        sheet = get_sheet()
+        header = ["id", "title", "author", "ingredients", "steps", "image_b64", "created_at"]
+        values = sheet.get_all_values()
+        if not values or values[0] != header:
+            sheet.clear()
+            sheet.append_row(header)
+    except:
+        pass
 
 def add_recipe(title, author, ingredients, steps, image_b64):
     sheet = get_sheet()
@@ -45,14 +46,13 @@ def compress_image(uploaded_file):
     img = Image.open(uploaded_file)
     if img.mode != 'RGB':
         img = img.convert('RGB')
-    img.thumbnail((400, 400)) # 少し小さめにして安定性を高める
+    img.thumbnail((400, 400))
     buffer = BytesIO()
-    img.save(buffer, format="JPEG", quality=50) # 圧縮率を少し上げる
+    img.save(buffer, format="JPEG", quality=50)
     return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 def get_all_recipes():
     sheet = get_sheet()
-    # 🌟 get_all_values で取得してから DataFrame にすることで「titleが見つからない」エラーを防ぐ
     rows = sheet.get_all_values()
     if len(rows) <= 1:
         return pd.DataFrame()
@@ -60,8 +60,6 @@ def get_all_recipes():
     header = rows[0]
     data = rows[1:]
     df = pd.DataFrame(data, columns=header)
-    
-    # 新しい順に並び替え
     df = df.iloc[::-1].reset_index(drop=True)
     return df
 
@@ -79,7 +77,10 @@ def delete_recipe(recipe_id):
 # ==========================================
 st.set_page_config(page_title="2人のレシピ", page_icon="🍳")
 
-init_db()
+# 起動時に一度だけ実行
+if 'db_initialized' not in st.session_state:
+    init_db()
+    st.session_state['db_initialized'] = True
 
 st.title("2人のレシピ🍳")
 st.write("今日も料理してえらいね！")
@@ -117,3 +118,30 @@ with tab1:
     try:
         df = get_all_recipes()
         if df.empty:
+            st.info("まだレシピがないよ。登録してみてね！")
+        else:
+            for i, row in df.iterrows():
+                # タイトルがない空行はスキップ
+                if not row.get('title'):
+                    continue
+                
+                st.markdown(f"### 🍽️ {row['title']}")
+                st.caption(f"👤 {row['author']} | 📅 {row['created_at']}")
+                
+                # 写真表示
+                if row.get('image_b64'):
+                    try:
+                        img_data = base64.b64decode(row['image_b64'])
+                        st.image(img_data, use_container_width=True)
+                    except:
+                        pass
+                
+                with st.expander("詳細を見る"):
+                    st.write("**【材料】**\n", row['ingredients'])
+                    st.write("**【作り方】**\n", row['steps'])
+                    if st.button("🗑️ 削除", key=f"del_{row['id']}"):
+                        delete_recipe(row['id'])
+                        st.rerun()
+                st.markdown("---")
+    except Exception as e:
+        st.error("表示中にエラーが発生しました。ページを更新してください。")
