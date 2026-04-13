@@ -15,6 +15,7 @@ SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1DWKGtW5dDD1yUXllV7cJP
 
 def get_gspread_client():
     scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+    # Streamlit Secretsから認証情報を取得
     secret_dict = json.loads(st.secrets["gcp_secret"])
     credentials = Credentials.from_service_account_info(secret_dict, scopes=scopes)
     return gspread.authorize(credentials)
@@ -25,6 +26,7 @@ def get_sheet():
     return sh.sheet1
 
 def init_db():
+    """スプレッドシートの初期設定"""
     try:
         sheet = get_sheet()
         header = ["id", "title", "author", "ingredients", "steps", "image_b64", "created_at"]
@@ -42,6 +44,7 @@ def add_recipe(title, author, ingredients, steps, image_b64):
     sheet.append_row([recipe_id, title, author, ingredients, steps, image_b64, now])
 
 def compress_image(uploaded_file):
+    """画像を圧縮してBase64形式に変換"""
     img = Image.open(uploaded_file)
     if img.mode != 'RGB':
         img = img.convert('RGB')
@@ -59,6 +62,7 @@ def get_all_recipes():
     header = rows[0]
     data = rows[1:]
     df = pd.DataFrame(data, columns=header)
+    # 新しい登録順に並び替え
     df = df.iloc[::-1].reset_index(drop=True)
     return df
 
@@ -76,6 +80,7 @@ def delete_recipe(recipe_id):
 # ==========================================
 st.set_page_config(page_title="2人のレシピ", page_icon="🍳")
 
+# 起動時に一度だけDB初期化
 if 'db_initialized' not in st.session_state:
     init_db()
     st.session_state['db_initialized'] = True
@@ -85,6 +90,7 @@ st.write("今日も料理してえらいね！")
 
 tab1, tab2 = st.tabs(["📖 レシピを見る", "✍️ 登録する"])
 
+# --- タブ2：登録画面 ---
 with tab2:
     st.subheader("新しいレシピを登録")
     with st.form(key='recipe_form', clear_on_submit=True):
@@ -112,36 +118,50 @@ with tab2:
             else:
                 st.error("入力を完成させてね！")
 
+# --- タブ1：一覧画面 ---
 with tab1:
     try:
         df = get_all_recipes()
         if df.empty:
             st.info("まだレシピがないよ。登録してみてね！")
         else:
+            # 検索機能
+            search_query = st.text_input("🔍 検索")
+            if search_query:
+                df = df[df['title'].str.contains(search_query, na=False) | 
+                        df['ingredients'].str.contains(search_query, na=False)]
+
+            st.markdown("---")
+
             for i, row in df.iterrows():
+                # タイトルがない空行はスキップ
                 if not row.get('title'):
                     continue
                 
                 st.markdown(f"### 🍽️ {row['title']}")
                 st.caption(f"👤 {row['author']} | 📅 {row['created_at']}")
                 
-                # 詳細（expander）の中身
+                # ここから下が「詳細」の中身
                 with st.expander("詳細を見る"):
-                    # 🌟 写真表示をここ（詳細の中）に移動しました
-                    if row.get('image_b64'):
+                    # 🌟 写真表示はココ（expanderの中）だけ！
+                    if row.get('image_b64') and row['image_b64'] != "":
                         try:
                             img_data = base64.b64decode(row['image_b64'])
                             st.image(img_data, use_container_width=True)
                         except:
-                            pass
+                            st.caption("📷 写真の読み込みに失敗しました")
                     
-                    st.write("**【材料】**\n", row['ingredients'])
-                    st.write("**【作り方】**\n", row['steps'])
+                    st.write("**【材料】**")
+                    st.write(row['ingredients'])
+                    st.write("**【作り方】**")
+                    st.write(row['steps'])
                     
                     st.markdown("---")
+                    # 削除ボタン
                     if st.button("🗑️ 削除", key=f"del_{row['id']}"):
                         delete_recipe(row['id'])
                         st.rerun()
+                
                 st.markdown("---")
     except Exception as e:
-        st.error("表示中にエラーが発生しました。ページを更新してください。")
+        st.error(f"表示中にエラーが発生しました。")
