@@ -3,11 +3,11 @@ import pandas as pd
 from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
+import json  # ← 🌟JSONを読み込むために追加しました
 
 # ==========================================
 # 1. スプレッドシート接続設定
 # ==========================================
-# スプレッドシートのURL（あなたが教えてくれたもの）
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1DWKGtW5dDD1yUXllV7cJP-xQJJpHwPGAj66lVOtazqk/edit"
 
 def get_gspread_client():
@@ -16,9 +16,11 @@ def get_gspread_client():
         'https://www.googleapis.com/auth/spreadsheets',
         'https://www.googleapis.com/auth/drive'
     ]
-    # StreamlitのSecretsからJSONの中身を読み込む
+    # 🌟変更点：Secretsから文字として取り出したJSONを、辞書データに変換する
+    secret_dict = json.loads(st.secrets["gcp_secret"])
+    
     credentials = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
+        secret_dict,
         scopes=scopes
     )
     return gspread.authorize(credentials)
@@ -38,7 +40,6 @@ def init_db():
 def add_recipe(title, author, ingredients, steps):
     sheet = get_sheet()
     now = datetime.now().strftime("%y/%m/%d %H:%M")
-    # 簡易的なIDとして現在のタイムスタンプ（数値）を使用
     recipe_id = str(int(datetime.now().timestamp()))
     sheet.append_row([recipe_id, title, author, ingredients, steps, now])
 
@@ -47,16 +48,14 @@ def get_all_recipes():
     data = sheet.get_all_records()
     df = pd.DataFrame(data)
     if not df.empty:
-        # IDの新しい順に並べ替え
         df = df.iloc[::-1].reset_index(drop=True)
     return df
 
 def delete_recipe(recipe_id):
     sheet = get_sheet()
-    # IDが一致する行を探して削除（ヘッダーがあるので+1、gspreadは1始まりなのでさらに+1）
     all_values = sheet.get_all_values()
     for i, row in enumerate(all_values):
-        if i == 0: continue # ヘッダーはスキップ
+        if i == 0: continue
         if row[0] == str(recipe_id):
             sheet.delete_rows(i + 1)
             break
