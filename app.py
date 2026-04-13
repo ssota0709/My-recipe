@@ -67,8 +67,8 @@ with tab2:
     with st.form(key='recipe_form', clear_on_submit=True):
         title = st.text_input("レシピ名", placeholder="例：絶品カレー")
         author = st.radio("作った人", ["にゃんたろ", "ねこちゃん"], horizontal=True)
-        ingredients = st.text_area("材料", height=100)
-        steps = st.text_area("作り方", height=100)
+  　　  ingredients = st.text_area("材料", placeholder="例：\n・鶏もも肉 1枚\n・玉ねぎ 1個", height=100)
+        steps = st.text_area("作り方", placeholder="例：\n1. 切る\n2. 炒める", height=100)
         
         submit_button = st.form_submit_button(label="保存する")
         
@@ -116,4 +116,3 @@ with tab1:
                     st.rerun()
             
             st.markdown("---")
-
