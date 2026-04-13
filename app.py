@@ -25,7 +25,6 @@ def get_sheet():
     return sh.sheet1
 
 def init_db():
-    """スプレッドシートの1行目を強制的に正しくセットする"""
     try:
         sheet = get_sheet()
         header = ["id", "title", "author", "ingredients", "steps", "image_b64", "created_at"]
@@ -77,7 +76,6 @@ def delete_recipe(recipe_id):
 # ==========================================
 st.set_page_config(page_title="2人のレシピ", page_icon="🍳")
 
-# 起動時に一度だけ実行
 if 'db_initialized' not in st.session_state:
     init_db()
     st.session_state['db_initialized'] = True
@@ -121,24 +119,26 @@ with tab1:
             st.info("まだレシピがないよ。登録してみてね！")
         else:
             for i, row in df.iterrows():
-                # タイトルがない空行はスキップ
                 if not row.get('title'):
                     continue
                 
                 st.markdown(f"### 🍽️ {row['title']}")
                 st.caption(f"👤 {row['author']} | 📅 {row['created_at']}")
                 
-                # 写真表示
-                if row.get('image_b64'):
-                    try:
-                        img_data = base64.b64decode(row['image_b64'])
-                        st.image(img_data, use_container_width=True)
-                    except:
-                        pass
-                
+                # 詳細（expander）の中身
                 with st.expander("詳細を見る"):
+                    # 🌟 写真表示をここ（詳細の中）に移動しました
+                    if row.get('image_b64'):
+                        try:
+                            img_data = base64.b64decode(row['image_b64'])
+                            st.image(img_data, use_container_width=True)
+                        except:
+                            pass
+                    
                     st.write("**【材料】**\n", row['ingredients'])
                     st.write("**【作り方】**\n", row['steps'])
+                    
+                    st.markdown("---")
                     if st.button("🗑️ 削除", key=f"del_{row['id']}"):
                         delete_recipe(row['id'])
                         st.rerun()
