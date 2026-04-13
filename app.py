@@ -47,12 +47,12 @@ def get_all_recipes():
 # ==========================================
 # 2. 画面の構築（Streamlit UI）
 # ==========================================
-st.set_page_config(page_title="ふたりのレシピ帳", page_icon="🍳", layout="centered")
+st.set_page_config(page_title="にゃんたろレシピ", page_icon="🍳", layout="centered")
 
 init_db()
 
-st.title("🍳 ふたりのレシピ帳")
-st.write("検索機能と写真アップロードに対応しました！")
+st.title("にゃんたろレシピ🐈")
+st.write("今日も料理してえらいね！")
 
 tab1, tab2 = st.tabs(["📖 レシピを見る", "✍️ 新しく登録する"])
 
@@ -62,7 +62,7 @@ with tab2:
     
     with st.form(key='recipe_form', clear_on_submit=True):
         title = st.text_input("レシピ名", placeholder="例：絶品！鶏肉のトマト煮込み")
-        author = st.radio("作った人", ["彼氏", "彼女"], horizontal=True)
+        author = st.radio("作った人", ["にゃんたろ", "ねこちゃん"], horizontal=True)
         ingredients = st.text_area("材料", placeholder="例：\n・鶏もも肉 1枚\n・玉ねぎ 1個", height=100)
         steps = st.text_area("作り方", placeholder="例：\n1. 切る\n2. 炒める", height=100)
         
@@ -98,7 +98,7 @@ with tab1:
             with col_search:
                 search_query = st.text_input("🔍 レシピ名や材料で検索")
             with col_filter:
-                author_filter = st.radio("絞り込み", ["すべて", "彼氏", "彼女"], horizontal=True)
+                author_filter = st.radio("絞り込み", ["すべて", "にゃんたろ", "ねこちゃん"], horizontal=True)
         
         # 検索キーワードと絞り込みの条件でデータを裏側でフィルタリング
         if search_query:
