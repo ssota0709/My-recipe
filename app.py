@@ -2,7 +2,6 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
-import base64
 
 # ==========================================
 # 1. データベース設定
@@ -12,6 +11,7 @@ DB_NAME = 'our_recipes_v2.db'
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
+    # ※後方互換性のため image_b64 の列は残しています
     c.execute('''
         CREATE TABLE IF NOT EXISTS recipes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,12 +26,13 @@ def init_db():
     conn.commit()
     conn.close()
 
-def add_recipe(title, author, ingredients, steps, image_b64):
+def add_recipe(title, author, ingredients, steps):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     now = datetime.now().strftime("%y/%m/%d %H:%M")
+    # 写真データは空文字("")として保存します
     c.execute('INSERT INTO recipes (title, author, ingredients, steps, image_b64, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-              (title, author, ingredients, steps, image_b64, now))
+              (title, author, ingredients, steps, "", now))
     conn.commit()
     conn.close()
 
@@ -53,17 +54,6 @@ def delete_recipe(recipe_id):
 # ==========================================
 st.set_page_config(page_title="2人のレシピ", page_icon="🍳", layout="centered")
 
-# スマホで横並びを維持するためのCSS調整（修正済み！）
-st.markdown("""
-    <style>
-    [data-testid="column"] {
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
 init_db()
 
 st.title("2人のレシピ🍳")
@@ -79,16 +69,12 @@ with tab2:
         author = st.radio("作った人", ["にゃんたろ", "ねこちゃん"], horizontal=True)
         ingredients = st.text_area("材料", height=100)
         steps = st.text_area("作り方", height=100)
-        uploaded_file = st.file_uploader("写真", type=["jpg", "jpeg", "png"])
         
         submit_button = st.form_submit_button(label="保存する")
         
         if submit_button:
             if title and ingredients and steps:
-                image_b64 = ""
-                if uploaded_file is not None:
-                    image_b64 = base64.b64encode(uploaded_file.read()).decode("utf-8")
-                add_recipe(title, author, ingredients, steps, image_b64)
+                add_recipe(title, author, ingredients, steps)
                 st.success(f"「{title}」を保存したよ！")
             else:
                 st.error("入力が足りないよ！")
@@ -112,32 +98,22 @@ with tab1:
 
         st.markdown("---")
 
-        # レシピ表示ループ
+        # レシピ表示ループ（写真なしのシンプルレイアウト）
         for index, row in recipes_df.iterrows():
-            # 写真とテキストを 1:2.5 の比率で横並びに
-            col_img, col_txt = st.columns([1, 2.5])
+            st.markdown(f"### 🍽️ {row['title']}")
+            st.caption(f"👤 {row['author']} | 📅 {row['created_at']}")
             
-            with col_img:
-                if row['image_b64']:
-                    img_data = base64.b64decode(row['image_b64'])
-                    st.image(img_data, use_container_width=True)
-                else:
-                    st.markdown("🖼️\nNo Photo")
-            
-            with col_txt:
-                st.markdown(f"### {row['title']}")
-                st.caption(f"👤 {row['author']} | 📅 {row['created_at']}")
+            with st.expander("材料・作り方を見る"):
+                st.markdown("**【材料】**")
+                st.write(row['ingredients'])
+                st.markdown("**【作り方】**")
+                st.write(row['steps'])
                 
-                with st.expander("材料・作り方を見る"):
-                    st.markdown("**【材料】**")
-                    st.write(row['ingredients'])
-                    st.markdown("**【作り方】**")
-                    st.write(row['steps'])
-                    
-                    # 削除ボタン
-                    st.markdown("---")
-                    if st.button("🗑️ 削除する", key=f"del_{row['id']}"):
-                        delete_recipe(row['id'])
-                        st.rerun()
+                # 削除ボタン
+                st.markdown("---")
+                if st.button("🗑️ 削除する", key=f"del_{row['id']}"):
+                    delete_recipe(row['id'])
+                    st.rerun()
             
             st.markdown("---")
+
