@@ -46,6 +46,28 @@ def add_recipe(title, author, ingredients, steps, image_b64):
         recipe_id = str(int(datetime.now().timestamp()))
         sheet.append_row([recipe_id, title, author, ingredients, steps, image_b64, now])
 
+def update_recipe(recipe_id, title, author, ingredients, steps, image_b64):
+    sheet = get_sheet()
+    if sheet:
+        all_values = sheet.get_all_values()
+        for i, row in enumerate(all_values):
+            if i > 0 and row[0] == str(recipe_id):
+                # 指定した行を更新 (リストのインデックスは0から、gspreadの行番号は1から)
+                # 画像が新しくアップロードされていない場合は元の画像を残す
+                final_img = image_b64 if image_b64 else row[5]
+                updated_row = [recipe_id, title, author, ingredients, steps, final_img, row[6]]
+                sheet.update(f"A{i+1}:G{i+1}", [updated_row])
+                break
+
+def delete_recipe(recipe_id):
+    sheet = get_sheet()
+    if sheet:
+        all_values = sheet.get_all_values()
+        for i, row in enumerate(all_values):
+            if i > 0 and row[0] == str(recipe_id):
+                sheet.delete_rows(i + 1)
+                break
+
 def compress_image(uploaded_file):
     try:
         img = Image.open(uploaded_file)
@@ -67,7 +89,7 @@ def get_all_recipes():
     return df.iloc[::-1].reset_index(drop=True)
 
 # ==========================================
-# 2. 認証機能 (Secretsから合言葉を読み込む)
+# 2. 認証機能
 # ==========================================
 def check_password():
     if "password_correct" not in st.session_state:
@@ -78,7 +100,6 @@ def check_password():
     st.title("🔒 2人の秘密のレシピ帳")
     pwd = st.text_input("合言葉を入れてね", type="password")
     if st.button("ログイン"):
-        # 🌟金庫(Secrets)の中の合言葉と照合
         if pwd == st.secrets["app_password"]:
             st.session_state["password_correct"] = True
             st.rerun()
@@ -103,7 +124,7 @@ if check_password():
         st.subheader("新しいレシピを登録")
         with st.form(key='recipe_form', clear_on_submit=True):
             title = st.text_input("レシピ名")
-            author = st.radio("作った人", ["にゃんたろ", "ねこちゃん"], horizontal=True)
+            author = st.radio("作った人", ["にゃんたろ", "ねこちゃん"], horizontal=True, key="new_author")
             ingredients = st.text_area("材料")
             steps = st.text_area("作り方")
             uploaded_file = st.file_uploader("写真", type=["jpg", "jpeg", "png"])
@@ -113,6 +134,7 @@ if check_password():
                     add_recipe(title, author, ingredients, steps, img_b64)
                     st.success("保存したよ！")
                     st.balloons()
+                    st.rerun()
                 else:
                     st.error("入力が足りないよ")
 
@@ -124,17 +146,59 @@ if check_password():
             else:
                 for i, row in df.iterrows():
                     if not row.get('title'): continue
+                    
+                    # 編集モードの管理
+                    edit_key = f"edit_mode_{row['id']}"
+                    if edit_key not in st.session_state:
+                        st.session_state[edit_key] = False
+
                     st.markdown(f"### 🍽️ {row['title']}")
                     st.caption(f"👤 {row['author']} | 📅 {row['created_at']}")
+                    
                     with st.expander("詳細を見る"):
-                        # 🌟写真表示(エラーに強く改造)
-                        if row.get('image_b64'):
-                            try:
-                                st.image(base64.b64decode(row['image_b64']), use_container_width=True)
-                            except:
-                                st.warning("📷 写真の読み込みに失敗しました")
-                        st.write("**【材料】**\n", row['ingredients'])
-                        st.write("**【作り方】**\n", row['steps'])
+                        if not st.session_state[edit_key]:
+                            # --- 通常表示モード ---
+                            if row.get('image_b64'):
+                                try:
+                                    st.image(base64.b64decode(row['image_b64']), use_container_width=True)
+                                except:
+                                    st.warning("📷 写真の読み込みに失敗しました")
+                            
+                            st.write("**【材料】**\n", row['ingredients'])
+                            st.write("**【作り方】**\n", row['steps'])
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if st.button("📝 編集する", key=f"btn_edit_{row['id']}"):
+                                    st.session_state[edit_key] = True
+                                    st.rerun()
+                            with col2:
+                                if st.button("🗑️ 削除する", key=f"btn_del_{row['id']}"):
+                                    delete_recipe(row['id'])
+                                    st.success("削除しました")
+                                    st.rerun()
+                        else:
+                            # --- 編集入力モード ---
+                            st.write("✏️ **レシピを編集中...**")
+                            new_title = st.text_input("レシピ名", value=row['title'], key=f"edit_title_{row['id']}")
+                            new_author = st.radio("作った人", ["にゃんたろ", "ねこちゃん"], 
+                                                index=0 if row['author']=="にゃんたろ" else 1, 
+                                                horizontal=True, key=f"edit_auth_{row['id']}")
+                            new_ingredients = st.text_area("材料", value=row['ingredients'], key=f"edit_ing_{row['id']}")
+                            new_steps = st.text_area("作り方", value=row['steps'], key=f"edit_step_{row['id']}")
+                            new_file = st.file_uploader("写真を変更する場合のみ選択", type=["jpg", "jpeg", "png"], key=f"edit_img_{row['id']}")
+                            
+                            ecol1, ecol2 = st.columns(2)
+                            with ecol1:
+                                if st.button("✅ 保存", key=f"save_{row['id']}"):
+                                    new_img_b64 = compress_image(new_file) if new_file else ""
+                                    update_recipe(row['id'], new_title, new_author, new_ingredients, new_steps, new_img_b64)
+                                    st.session_state[edit_key] = False
+                                    st.rerun()
+                            with ecol2:
+                                if st.button("❌ キャンセル", key=f"cancel_{row['id']}"):
+                                    st.session_state[edit_key] = False
+                                    st.rerun()
                     st.markdown("---")
-        except:
-            st.error("読み込みエラー。更新してください。")
+        except Exception as e:
+            st.error(f"エラーが発生しました: {e}")
