@@ -71,9 +71,9 @@ def compress_image(uploaded_file):
         img = Image.open(uploaded_file)
         if img.mode != 'RGB':
             img = img.convert('RGB')
-        img.thumbnail((400, 400))
+        img.thumbnail((800, 800))
         buffer = BytesIO()
-        img.save(buffer, format="JPEG", quality=50)
+        img.save(buffer, format="JPEG", quality=80)
         return base64.b64encode(buffer.getvalue()).decode("utf-8")
     except:
         return ""
