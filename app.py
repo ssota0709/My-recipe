@@ -52,8 +52,6 @@ def update_recipe(recipe_id, title, author, ingredients, steps, image_b64):
         all_values = sheet.get_all_values()
         for i, row in enumerate(all_values):
             if i > 0 and row[0] == str(recipe_id):
-                # 指定した行を更新 (リストのインデックスは0から、gspreadの行番号は1から)
-                # 画像が新しくアップロードされていない場合は元の画像を残す
                 final_img = image_b64 if image_b64 else row[5]
                 updated_row = [recipe_id, title, author, ingredients, steps, final_img, row[6]]
                 sheet.update(f"A{i+1}:G{i+1}", [updated_row])
@@ -147,7 +145,6 @@ if check_password():
                 for i, row in df.iterrows():
                     if not row.get('title'): continue
                     
-                    # 編集モードの管理
                     edit_key = f"edit_mode_{row['id']}"
                     if edit_key not in st.session_state:
                         st.session_state[edit_key] = False
@@ -157,15 +154,17 @@ if check_password():
                     
                     with st.expander("詳細を見る"):
                         if not st.session_state[edit_key]:
-                            # --- 通常表示モード ---
                             if row.get('image_b64'):
                                 try:
                                     st.image(base64.b64decode(row['image_b64']), use_container_width=True)
                                 except:
                                     st.warning("📷 写真の読み込みに失敗しました")
                             
-                            st.write("**【材料】**\n", row['ingredients'])
-                            st.write("**【作り方】**\n", row['steps'])
+                            # 🌟 改行を反映させるためにテキストを表示
+                            st.write("**【材料】**")
+                            st.text(row['ingredients'])
+                            st.write("**【作り方】**")
+                            st.text(row['steps'])
                             
                             col1, col2 = st.columns(2)
                             with col1:
@@ -178,7 +177,6 @@ if check_password():
                                     st.success("削除しました")
                                     st.rerun()
                         else:
-                            # --- 編集入力モード ---
                             st.write("✏️ **レシピを編集中...**")
                             new_title = st.text_input("レシピ名", value=row['title'], key=f"edit_title_{row['id']}")
                             new_author = st.radio("作った人", ["にゃんたろ", "ねこちゃん"], 
